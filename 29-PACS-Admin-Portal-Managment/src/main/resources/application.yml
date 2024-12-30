@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: 29-PACS-Admin-Portal-Managment
+  datasource:
+         driver-class-name: 
+         url: jdbc:oracle:thin:@localhost:1521:orcl
+         username: system 
+         password: java
+  jpa:
+     database-platform: org.hibernate.dialect.OracleDialect
+     hibernate:
+           ddl-auto: update
+     show-sql: true
+server:
+    port: 4041
+---
+spring:
+    batch:
+        job:
+           enabled: true
+        jdbc:
+           initialize-schema: always
