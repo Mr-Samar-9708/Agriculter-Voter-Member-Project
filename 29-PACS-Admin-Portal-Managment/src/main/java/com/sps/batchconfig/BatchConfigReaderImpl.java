@@ -16,9 +16,9 @@ import org.springframework.batch.item.data.RepositoryItemWriter;
 import org.springframework.batch.item.data.builder.RepositoryItemWriterBuilder;
 import org.springframework.batch.item.file.FlatFileItemReader;
 import org.springframework.batch.item.file.builder.FlatFileItemReaderBuilder;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
+import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import com.sps.entity.PacsMemEntity;
@@ -27,14 +27,14 @@ import com.sps.listener.PacsMemListener;
 import com.sps.processor.PacsMemProcessor;
 import com.sps.repository.IPacsMangRepository;
 
-@Configuration // Marks this class as a configuration for Spring Batch.
-public class BatchConfigurationImpl implements IBatchProcessingService{
+@Component // Marks this class as a Spring bean.
+public class BatchConfigReaderImpl implements IBatchProcessingService{
 
     // Path of the input file, made static to share across methods.
-	private static String path = null;
+	/*private static String path = null;*/
 
 	//Chuck for process the data at a time based on number.
-	private static int chunkNum = 0;
+	private int chunkSize = 0;
 	
 	private static final int FILE_LOAD_DELAY_MS = 5;
 	
@@ -57,7 +57,7 @@ public class BatchConfigurationImpl implements IBatchProcessingService{
 	private final JobLauncher jobLauncher;
 
     // Constructor for dependency injection (assigning values to static fields).
-	public BatchConfigurationImpl(IPacsMangRepository pacsRepo, PacsMemProcessor pacsProcessor,
+	public BatchConfigReaderImpl(IPacsMangRepository pacsRepo, PacsMemProcessor pacsProcessor,
 			PacsMemListener pacsListener, JobRepository jobRepo, PlatformTransactionManager txManager,
 			JobLauncher jobLauncher) {
 		this.pacsRepo = pacsRepo;
@@ -69,10 +69,20 @@ public class BatchConfigurationImpl implements IBatchProcessingService{
 	}
 	
     // Method to read data from a CSV file.
-    public  FlatFileItemReader<PacsMemEntity> readExcelFile() {
-        return new FlatFileItemReaderBuilder<PacsMemEntity>()
+	/*public FlatFileItemReader<PacsMemEntity> readExcelFile(@Value("#{jobParameters['fileName']}") String userFile) {
+		return new FlatFileItemReaderBuilder<PacsMemEntity>()
+	            .name("file-reader") // Name the reader for debugging.
+	            .resource(new FileSystemResource(userFile)) // Read the file using the dynamic path.
+	            .delimited() // Indicates the file uses comma-separated values (CSV format).
+	            .names("serialNo", "name", "fatherOrHushband", "villageNam", "wordNo", "headOfFamily")
+	            .targetType(PacsMemEntity.class) // Maps each row to a PacsMemEntity object.
+	            .build();
+	}*/
+
+	public FlatFileItemReader<PacsMemEntity> createReader(String userFile) {
+		return new FlatFileItemReaderBuilder<PacsMemEntity>()
                 .name("file-reader") // Name the reader for debugging.
-                .resource(new ClassPathResource(BatchConfigurationImpl.path)) // Read the file using the dynamic path.
+                .resource(new ClassPathResource(userFile)) // Read the file using the dynamic path.
                 .delimited() // Indicates the file uses comma-separated values (CSV format).
                 .names("serialNo", "name", "fatherOrHushband", "villageNam", "wordNo", "headOfFamily")
                 .targetType(PacsMemEntity.class) // Maps each row to a PacsMemEntity object.
@@ -88,10 +98,10 @@ public class BatchConfigurationImpl implements IBatchProcessingService{
     }
 
     // Define a step that combines reading, processing, and writing.
-    public  Step createStep() {
+    public  Step createStep(String userFile) {
         return new StepBuilder("step1", this.jobRepo) // Name the step and link the job repository.
-                .<PacsMemEntity, PacsMemEntity>chunk(BatchConfigurationImpl.chunkNum, this.txManager) // Process 10 records at a time.
-                .reader(this.readExcelFile()) // Use the file reader for input.
+                .<PacsMemEntity, PacsMemEntity>chunk(this.chunkSize, this.txManager) // Process 10 records at a time.
+                .reader(createReader(userFile)) // Use the file reader for input.
                 .processor(this.pacsProcessor) // Use the processor for transformations.
                 .writer(this.writerInDb()) // Write the transformed data to the database.
                 .listener(this.pacsListener) // Add a listener for logging events.
@@ -99,26 +109,36 @@ public class BatchConfigurationImpl implements IBatchProcessingService{
     }
 
     // Define the batch job that executes the defined step.
-    public  Job createJob() {
+    public  Job createJob(String userFile) {
         return new JobBuilder("job1", this.jobRepo) // Name the job and link the job repository.
                 .incrementer(new RunIdIncrementer()) // Increment the job ID for unique identification of runs.
                 .listener(this.pacsListener) // Add a listener to the job for logging.
-                .start(this.createStep()) // Set the starting step.
+                .start(this.createStep(userFile)) // Set the starting step.
                 .build();
     }
 
 	@Override // Method to dynamically execute the batch job using a specific file path.
 	public JobExecution performBatchProcessing(String filePath) {
-		BatchConfigurationImpl.path = filePath; // Dynamically set the file path.
-		BatchConfigurationImpl.chunkNum = calculateDynamicChunkSize(filePath);// Calculating chunk dynamically
-
+		/*BatchConfigReaderImpl.path = filePath; // Dynamically set the file path.
+		BatchConfigReaderImpl.chunkNum = calculateDynamicChunkSize(filePath);// Calculating chunk dynamically
+		*/
+	
 		try {
+			
+			if (!isFileCorrect(filePath)) {
+				throw new FileNotFoundException("Wrong path or file not exist...!");
+			}
+			
 			Thread.sleep(FILE_LOAD_DELAY_MS); // I am specifying for load file appropriately.
 
-			Job job = createJob(); // Create the job instance.
+			Job job = createJob(filePath); // Create the job instance.
+			
 			JobParametersBuilder builder = new JobParametersBuilder();
+			//builder.addString("fileName", filePath); // we can pass file path through JobParameters also
 			builder.addLong("run.id", System.currentTimeMillis());// Add a unique parameter to ensure a fresh run.
+
 			JobParameters jobParams = builder.toJobParameters();
+			
 			JobExecution execution = jobLauncher.run(job, // Launch the job.
 					                                                                              jobParams);
 			return execution;
@@ -132,38 +152,39 @@ public class BatchConfigurationImpl implements IBatchProcessingService{
 		
 	}
 	
-	private int calculateDynamicChunkSize(String filePath) {
-		// Here I have added detail how will check
+	private boolean isFileCorrect(String filePath) {
+		// Here I have added detail how we will check.
 		/*1 byte = 8 bits, 1 kilobyte (KB) = 1000 bytes, and 1 megabyte (MB) = 1,000,000 bytes. */
+
+		boolean isExist = false;
 
 		if (filePath == null || filePath.isEmpty()) {
 			throw new IllegalArgumentException("File-path is not specified or is empty.");
 		}
 
-		int chunkSize = 0;
-
 		try {
-			// Load file from the classpath
+			/*Here I am taking "FileSystemResource" instead of ClassPathResource because I
+			 want to read fill from System location here I can also simple "File class".*/
 			Resource resource = new ClassPathResource(filePath);
 
 			// Check if the file exists
 			if (!resource.exists()) {
 				throw new FileNotFoundException("File not found in classpath: " + filePath);
+			} else {
+				isExist = true;
 			}
 
 			// Get file size (the resource can be treated as an InputStream)
 			long fileSize = resource.contentLength(); // Get the size of the file.
 
-			// Example chunk size logic based on file size
-			if (fileSize > 1000000) { // File larger than 1 MB
-				chunkSize = 50;
-			} else {
-				chunkSize = 10; // Use smaller chunk size for smaller files
-			}
+			/*chunk size logic based on file size, if file larger than 1 MB then chunk size will be 50.*/
+			this.chunkSize = fileSize > 1000000 ? 50 : 10;
+
 		} catch (Exception e) {
-			e.printStackTrace(); // Print stack trace for debugging
+			throw new PacsAppException("Error validating file: " + filePath, e); // Print stack trace for debugging
 		}
-		return chunkSize;
+		
+		return isExist;
 	}
 
 }

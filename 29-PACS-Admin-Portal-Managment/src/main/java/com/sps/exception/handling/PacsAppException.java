@@ -14,4 +14,9 @@ public class PacsAppException extends RuntimeException {
 	public PacsAppException(String msg) {
 		super(msg);
 	}
+	
+	public PacsAppException(String msg, Exception e) {
+		super(msg, e);
+	}
+	
 }
