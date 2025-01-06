@@ -1,7 +1,5 @@
 package com.sps.controller;
 
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
@@ -29,10 +27,6 @@ public class PacsAppRestController {
 
 	@GetMapping("/loadingFile/{path}")
 	public ResponseEntity<String> performBatchProcess(@PathVariable String path) {
-	    // Decoding the path
-		/*String decodedPath = URLDecoder.decode(path, StandardCharsets.UTF_8);*/
-	    
-	    // Pass the decoded path to the service
 	    String msg = service.performBatchProcessing(path);
 	    return new ResponseEntity<>(msg, HttpStatus.OK);
 	}
